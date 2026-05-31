@@ -29,11 +29,14 @@
 </template>
 
 <script setup lang="ts">
-
+type Fruit = {
+    id: string
+    name: string
+}
 
 const counter = useState('counter', () => 0)
 
-const { data, pending, error } = await useFetch("/api/hello", {})
+const { data, pending, error } = await useFetch<{ fruits: Fruit[] }>("/api/fruits", {})
 
 useHead({
     title: 'Home'
