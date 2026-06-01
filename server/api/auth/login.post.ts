@@ -1,7 +1,12 @@
+import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { compare } from "bcrypt-ts";
-import * as tables from "../../db/schema";
-import { eq } from "drizzle-orm";
 import jwt from "jsonwebtoken";
+import { useFirebaseDb } from "../../utils/firebase";
+
+type Users = {
+  username: string;
+  password: string;
+};
 
 export default defineEventHandler(async (event) => {
   const { username, password } = await readBody(event);
@@ -13,36 +18,63 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const db = useDrizzle();
+  const db = useFirebaseDb();
 
-  const user = db
-    .select()
-    .from(tables.userTable)
-    .where(eq(tables.userTable.username, username))
-    .limit(1)
-    .get();
+  const usersRef = collection(db, "users");
 
-  if (!user) {
+  const userQuery = query(
+    usersRef,
+    where("username", "==", username),
+    limit(1),
+  );
+
+  const snapshot = await getDocs(userQuery);
+
+  if (snapshot.empty) {
     throw createError({
       statusCode: 404,
-      message: "User not found in Database",
+      message: "User not found",
     });
   }
 
-  if (!(await compare(password, user.password))) {
+  const userDoc = snapshot.docs.at(0);
+  if (!userDoc) {
+    throw createError({
+      statusCode: 404,
+      message: "User not found",
+    });
+  }
+  const userData = userDoc.data() as Users;
+
+  const passwordIsValid = await compare(password, userData.password);
+
+  if (!passwordIsValid) {
     throw createError({
       statusCode: 401,
-      message: "Invalid Password",
+      message: "Invalid password",
     });
   }
 
+  const config = useRuntimeConfig();
+
   const token = jwt.sign(
-    { id: user.id, username: user.username },
-    process.env.SECRET_KEY!,
+    {
+      id: userDoc.id,
+      username: userData.username,
+    },
+    config.secretKey,
     {
       algorithm: "HS256",
       expiresIn: "1d",
     },
   );
-  return { token };
+
+  return {
+    success: true,
+    token,
+    user: {
+      id: userDoc.id,
+      username: userData.username,
+    },
+  };
 });

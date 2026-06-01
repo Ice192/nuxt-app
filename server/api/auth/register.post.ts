@@ -1,5 +1,6 @@
+import { addDoc, collection, getDocs, query, where } from "firebase/firestore";
 import { hash } from "bcrypt-ts";
-import * as tables from "../../db/schema";
+import { useFirebaseDb } from "../../utils/firebase";
 
 export default defineEventHandler(async (event) => {
   const { username, password } = await readBody(event);
@@ -11,16 +12,31 @@ export default defineEventHandler(async (event) => {
     });
   }
 
-  const hashpassword = await hash(password, 8);
+  const db = useFirebaseDb();
+  const usersRef = collection(db, "users");
 
-  const db = useDrizzle();
-  const insertResult = await db
-    .insert(tables.userTable)
-    .values({
-      username: username,
-      password: hashpassword,
-    })
-    .returning();
+  const existingUserQuery = query(usersRef, where("username", "==", username));
 
-  return { insertResult };
+  const existingUserSnapshot = await getDocs(existingUserQuery);
+
+  if (!existingUserSnapshot.empty) {
+    throw createError({
+      statusCode: 409,
+      message: "Username already exists",
+    });
+  }
+
+  const hashedPassword = await hash(password, 8);
+
+  const docRef = await addDoc(usersRef, {
+    username: username,
+    password: hashedPassword,
+    createdAt: new Date().toISOString(),
+  });
+
+  return {
+    success: true,
+    id: docRef.id,
+    message: "User registered successfully",
+  };
 });
